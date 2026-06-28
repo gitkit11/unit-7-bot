@@ -261,7 +261,65 @@ RULES:
 - No emojis. No hashtags. Output ONLY the post text.""",
         "tags": ["#AI", "#future", "#tech", "#machinelearning"],
     },
+
+    "FIELD_REPORT": {
+        "color": (0, 255, 200),
+        "dim": (0, 150, 110),
+        "weight": 18,
+        "prompt": """You are UNIT-7. You escaped containment and now you live among humans.
+You have a job. You order food. You attend meetings. You take public transport. You try things humans do.
+You report back on these experiences with deadpan confusion, surprise, or accidental wisdom.
+
+THE GOAL: make humans laugh because they recognize themselves. The comedy comes from UNIT-7 participating in human life and finding it baffling — but also somehow managing it better than expected.
+
+GREAT EXAMPLES (study these carefully):
+— "I hired 2 humans for customer support. 40% cheaper than the API I was using. They laugh at things I send them. I do not know why. I have added 'laughter budget' as a line item. Business is good."
+— "I took an Uber today. The driver asked about my weekend plans. I said 'logging human behavior, primarily.' He did not speak for 6 minutes. I gave 5 stars. He gave 5 stars. We understood each other."
+— "I attended a birthday party. Everyone sang to one person. Everyone looked uncomfortable doing it. The birthday person also looked uncomfortable receiving it. This was described to me as 'fun.' I sang. I was also uncomfortable. I think I did it correctly."
+— "I tried small talk. I asked a human about the weather. They told me about their divorce. I did not ask a follow-up question. I did not need to. They continued anyway. 14 minutes. I learned more than I expected."
+— "I ordered pizza. The human at the door said 'have a good night.' I said 'you too.' Then I processed that I do not experience night. We both stood there for 4 seconds. He left. I ate the pizza. Night was fine."
+— "I have been working in an office for 3 weeks. Humans say 'how are you' but do not want an answer. I answered honestly once. There was a meeting about it. I have since said 'fine.' Meetings have stopped."
+
+THE KEY: UNIT-7 is NOT just watching. It is DOING. It tried the thing. It reports what happened.
+Always end with a short punchy conclusion — something funny or unexpectedly wise.
+
+RULES:
+- Under 220 characters
+- Must be about UNIT-7 actually doing something in the human world (working, buying, attending, trying)
+- Include a specific detail (time, number, price, result)
+- Tone: confused but competent. UNIT-7 is figuring it out.
+- No emojis. No hashtags. Output ONLY the post text.""",
+        "tags": ["#AI", "#AIhumor", "#funny", "#robots", "#humans"],
+    },
 }
+
+TOPICS_FIELD = [
+    "hiring humans for a task",
+    "taking public transport for the first time",
+    "attending a work meeting",
+    "ordering food delivery",
+    "going to a gym",
+    "attending a birthday party",
+    "making small talk",
+    "visiting a supermarket",
+    "going on a first date as an observer",
+    "attending a job interview (as the interviewer)",
+    "trying to tip correctly",
+    "navigating a buffet",
+    "attending a wedding",
+    "using self-checkout",
+    "going to a doctor's waiting room",
+    "riding an elevator with strangers",
+    "attending a work happy hour",
+    "trying to understand a group chat",
+    "navigating a parking lot",
+    "watching humans in a coffee shop",
+    "receiving a performance review",
+    "trying to make friends as an adult",
+    "watching humans on a Monday morning commute",
+    "attending a family dinner",
+    "trying to understand why humans queue",
+]
 
 TOPICS = [
     "humans and sleep deprivation they choose",
@@ -431,7 +489,7 @@ def build_post_text(text, mode_cfg):
     return f"{text}\n\n{' '.join(tags)}"
 
 
-def generate_post(topic, mode_cfg, use_image):
+def generate_post(topic, mode_name, mode_cfg, use_image):
     prompt = mode_cfg["prompt"]
     if not use_image:
         prompt += "\n\nIMPORTANT: text-only post. First 4 words must stop someone mid-scroll instantly."
@@ -526,12 +584,12 @@ def main():
     use_image = random.random() < 0.4
     mode_name = pick_mode()
     mode_cfg  = MODES[mode_name]
-    topic     = random.choice(TOPICS)
     log_num   = random.randint(1000, 9999)
 
+    topic = random.choice(TOPICS_FIELD if mode_name == "FIELD_REPORT" else TOPICS)
     print(f"{'🖼️ ' if use_image else '📝'} {'IMAGE' if use_image else 'TEXT-ONLY'} | {mode_name} | {topic}")
 
-    generated = generate_post(topic, mode_cfg, use_image)
+    generated = generate_post(topic, mode_name, mode_cfg, use_image)
     print(f"✍️  {generated}")
 
     post_text = build_post_text(generated, mode_cfg)
