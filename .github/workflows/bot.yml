@@ -1,0 +1,28 @@
+name: UNIT-7 Bot
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # 9:00 UTC (утро США)
+    - cron: '0 15 * * *'  # 15:00 UTC (день США)
+    - cron: '0 21 * * *'  # 21:00 UTC (вечер США)
+  workflow_dispatch:       # Можно запустить вручную
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: pip install requests
+      
+      - name: Run bot
+        env:
+          BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python bot.py
