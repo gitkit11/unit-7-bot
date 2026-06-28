@@ -1,14 +1,26 @@
 import requests
 import random
 import os
+import io
 from datetime import datetime, timezone
+from PIL import Image, ImageDraw, ImageFont
 
-# === НАСТРОЙКИ ===
 BLUESKY_HANDLE = "logging-humans.bsky.social"
 BLUESKY_APP_PASSWORD = os.environ.get("BLUESKY_APP_PASSWORD")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 
-# === ТЕМЫ ДЛЯ ПОСТОВ ===
+IMG_WIDTH = 1200
+IMG_HEIGHT = 675
+BG_COLOR = (0, 0, 0)
+GREEN = (0, 255, 70)
+DIM_GREEN = (0, 160, 40)
+
+FIXED_TAG = "#UNIT7"
+OPTIONAL_TAGS = [
+    "#AI", "#humans", "#observation", "#AIhumor", "#tech",
+    "#funny", "#robots", "#machinelearning", "#aiart", "#socialmedia"
+]
+
 TOPICS = [
     "humans and sleep",
     "humans and social media",
@@ -42,10 +54,94 @@ Your tone:
 - Occasionally add "I am still processing this." or "Logging for further analysis." or "No conclusion reached."
 - Never use emojis
 - Never be mean or offensive
-- Always under 280 characters total
+- Always under 200 characters total
 
 Write ONE single post (tweet-style) about the given topic.
 Output only the post text, nothing else."""
+
+
+def get_font(size):
+    font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeMono.ttf",
+        "C:/Windows/Fonts/consola.ttf",
+        "C:/Windows/Fonts/cour.ttf",
+    ]
+    for path in font_paths:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            pass
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def wrap_text(draw, text, font, max_width):
+    words = text.split()
+    lines = []
+    current = ""
+    for word in words:
+        test = f"{current} {word}".strip()
+        bbox = draw.textbbox((0, 0), test, font=font)
+        if (bbox[2] - bbox[0]) <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def generate_image(post_text, observation_num):
+    img = Image.new("RGB", (IMG_WIDTH, IMG_HEIGHT), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    padding = 60
+
+    header_font = get_font(28)
+    main_font = get_font(46)
+    footer_font = get_font(24)
+
+    # Header
+    header_text = f"UNIT-7 // OBSERVATION #{observation_num:03d}"
+    draw.text((padding, padding), header_text, font=header_font, fill=DIM_GREEN)
+
+    sep_y = padding + 50
+    draw.line([(padding, sep_y), (IMG_WIDTH - padding, sep_y)], fill=DIM_GREEN, width=1)
+
+    # Main text (centered vertically)
+    max_width = IMG_WIDTH - padding * 2
+    lines = wrap_text(draw, post_text, main_font, max_width)
+
+    lh_bbox = draw.textbbox((0, 0), "Ag", font=main_font)
+    line_height = (lh_bbox[3] - lh_bbox[1]) + 16
+
+    total_h = len(lines) * line_height
+    text_y = (IMG_HEIGHT - total_h) // 2
+
+    for i, line in enumerate(lines):
+        draw.text((padding, text_y + i * line_height), line, font=main_font, fill=GREEN)
+
+    # Footer
+    footer_sep_y = IMG_HEIGHT - padding - 40
+    draw.line([(padding, footer_sep_y), (IMG_WIDTH - padding, footer_sep_y)], fill=DIM_GREEN, width=1)
+    draw.text((padding, footer_sep_y + 8), "logging-humans.bsky.social", font=footer_font, fill=DIM_GREEN)
+
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=92)
+    buf.seek(0)
+    return buf.read()
+
+
+def build_post_text(generated_text):
+    tags = [FIXED_TAG] + random.sample(OPTIONAL_TAGS, k=random.randint(2, 3))
+    return f"{generated_text}\n\n{' '.join(tags)}"
+
 
 def generate_post(topic):
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -62,40 +158,53 @@ def generate_post(topic):
         "temperature": 0.9,
         "max_tokens": 100
     }
-
     response = requests.post(url, json=payload, headers=headers)
     data = response.json()
-
     if "choices" not in data:
         print(f"❌ Groq error: {data}")
         raise Exception(f"Groq API error: {data}")
+    return data["choices"][0]["message"]["content"].strip()
 
-    text = data["choices"][0]["message"]["content"].strip()
-    return text
 
 def login_bluesky():
     url = "https://bsky.social/xrpc/com.atproto.server.createSession"
-    payload = {
-        "identifier": BLUESKY_HANDLE,
-        "password": BLUESKY_APP_PASSWORD
-    }
-    response = requests.post(url, json=payload)
-    data = response.json()
+    resp = requests.post(url, json={"identifier": BLUESKY_HANDLE, "password": BLUESKY_APP_PASSWORD})
+    data = resp.json()
     return data["accessJwt"], data["did"]
 
-def post_to_bluesky(token, did, text):
+
+def upload_image(token, image_bytes):
+    url = "https://bsky.social/xrpc/com.atproto.repo.uploadBlob"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "image/jpeg"
+    }
+    resp = requests.post(url, headers=headers, data=image_bytes)
+    return resp.json()["blob"]
+
+
+def post_to_bluesky(token, did, text, blob_ref):
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     headers = {"Authorization": f"Bearer {token}"}
     payload = {
         "repo": did,
         "collection": "app.bsky.feed.post",
         "record": {
+            "$type": "app.bsky.feed.post",
             "text": text,
-            "createdAt": datetime.now(timezone.utc).isoformat()
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "embed": {
+                "$type": "app.bsky.embed.images",
+                "images": [{
+                    "image": blob_ref,
+                    "alt": "UNIT-7 observation log entry"
+                }]
+            }
         }
     }
-    response = requests.post(url, json=payload, headers=headers)
-    return response.json()
+    resp = requests.post(url, json=payload, headers=headers)
+    return resp.json()
+
 
 def main():
     print(f"🤖 UNIT-7 starting... {datetime.now()}")
@@ -103,14 +212,27 @@ def main():
     topic = random.choice(TOPICS)
     print(f"📝 Topic: {topic}")
 
-    post_text = generate_post(topic)
-    print(f"✍️ Generated: {post_text}")
+    observation_num = random.randint(1, 999)
+    print(f"🔢 Observation #{observation_num}")
+
+    generated_text = generate_post(topic)
+    print(f"✍️ Generated: {generated_text}")
+
+    post_text = build_post_text(generated_text)
+    print(f"📎 Full post:\n{post_text}")
+
+    image_bytes = generate_image(generated_text, observation_num)
+    print(f"🖼️ Image generated ({len(image_bytes)} bytes)")
 
     token, did = login_bluesky()
     print("✅ Logged in to Bluesky")
 
-    result = post_to_bluesky(token, did, post_text)
+    blob_ref = upload_image(token, image_bytes)
+    print("📤 Image uploaded")
+
+    result = post_to_bluesky(token, did, post_text, blob_ref)
     print(f"🚀 Posted! URI: {result.get('uri', 'unknown')}")
+
 
 if __name__ == "__main__":
     main()
