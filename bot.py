@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 # === НАСТРОЙКИ ===
 BLUESKY_HANDLE = "logging-humans.bsky.social"
 BLUESKY_APP_PASSWORD = os.environ.get("BLUESKY_APP_PASSWORD")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY").strip()
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 
 # === ТЕМЫ ДЛЯ ПОСТОВ ===
 TOPICS = [
