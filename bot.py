@@ -27,7 +27,6 @@ TOPICS = [
     "humans and complaining",
 ]
 
-# === SYSTEM PROMPT ДЛЯ ПЕРСОНАЖА ===
 SYSTEM_PROMPT = """You are UNIT-7, an AI that has been observing humans for years and logs everything you see.
 You are not evil or mean — you are genuinely confused by human behavior.
 You try to understand humans logically but their actions don't compute.
@@ -44,7 +43,6 @@ Write ONE single post (tweet-style) about the given topic.
 Output only the post text, nothing else."""
 
 def generate_post(topic):
-    """Generate a post using Gemini API"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     
     payload = {
@@ -62,11 +60,15 @@ def generate_post(topic):
     response = requests.post(url, json=payload)
     data = response.json()
     
+    # Показываем полный ответ если ошибка
+    if "candidates" not in data:
+        print(f"❌ Gemini error: {data}")
+        raise Exception(f"Gemini API error: {data}")
+    
     text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
     return text
 
 def login_bluesky():
-    """Login to Bluesky and get access token"""
     url = "https://bsky.social/xrpc/com.atproto.server.createSession"
     payload = {
         "identifier": BLUESKY_HANDLE,
@@ -77,7 +79,6 @@ def login_bluesky():
     return data["accessJwt"], data["did"]
 
 def post_to_bluesky(token, did, text):
-    """Post to Bluesky"""
     url = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
     headers = {"Authorization": f"Bearer {token}"}
     payload = {
@@ -94,19 +95,15 @@ def post_to_bluesky(token, did, text):
 def main():
     print(f"🤖 UNIT-7 starting... {datetime.now()}")
     
-    # Pick random topic
     topic = random.choice(TOPICS)
     print(f"📝 Topic: {topic}")
     
-    # Generate post
     post_text = generate_post(topic)
     print(f"✍️ Generated: {post_text}")
     
-    # Login to Bluesky
     token, did = login_bluesky()
     print("✅ Logged in to Bluesky")
     
-    # Post
     result = post_to_bluesky(token, did, post_text)
     print(f"🚀 Posted! URI: {result.get('uri', 'unknown')}")
 
