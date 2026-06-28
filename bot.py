@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 # === НАСТРОЙКИ ===
 BLUESKY_HANDLE = "logging-humans.bsky.social"
 BLUESKY_APP_PASSWORD = os.environ.get("BLUESKY_APP_PASSWORD")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 # === ТЕМЫ ДЛЯ ПОСТОВ ===
 TOPICS = [
@@ -25,6 +25,11 @@ TOPICS = [
     "humans and coffee",
     "humans and shopping",
     "humans and complaining",
+    "humans and motivation",
+    "humans and meetings",
+    "humans and news",
+    "humans and weather",
+    "humans and birthdays",
 ]
 
 SYSTEM_PROMPT = """You are UNIT-7, an AI that has been observing humans for years and logs everything you see.
@@ -43,29 +48,29 @@ Write ONE single post (tweet-style) about the given topic.
 Output only the post text, nothing else."""
 
 def generate_post(topic):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-    
-    payload = {
-        "contents": [{
-            "parts": [{
-                "text": f"{SYSTEM_PROMPT}\n\nTopic: {topic}"
-            }]
-        }],
-        "generationConfig": {
-            "temperature": 0.9,
-            "maxOutputTokens": 100
-        }
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
     }
-    
-    response = requests.post(url, json=payload)
+    payload = {
+        "model": "llama-3.1-70b-versatile",
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Topic: {topic}"}
+        ],
+        "temperature": 0.9,
+        "max_tokens": 100
+    }
+
+    response = requests.post(url, json=payload, headers=headers)
     data = response.json()
-    
-    # Показываем полный ответ если ошибка
-    if "candidates" not in data:
-        print(f"❌ Gemini error: {data}")
-        raise Exception(f"Gemini API error: {data}")
-    
-    text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+    if "choices" not in data:
+        print(f"❌ Groq error: {data}")
+        raise Exception(f"Groq API error: {data}")
+
+    text = data["choices"][0]["message"]["content"].strip()
     return text
 
 def login_bluesky():
@@ -94,18 +99,19 @@ def post_to_bluesky(token, did, text):
 
 def main():
     print(f"🤖 UNIT-7 starting... {datetime.now()}")
-    
+
     topic = random.choice(TOPICS)
     print(f"📝 Topic: {topic}")
-    
+
     post_text = generate_post(topic)
     print(f"✍️ Generated: {post_text}")
-    
+
     token, did = login_bluesky()
     print("✅ Logged in to Bluesky")
-    
+
     result = post_to_bluesky(token, did, post_text)
     print(f"🚀 Posted! URI: {result.get('uri', 'unknown')}")
 
 if __name__ == "__main__":
     main()
+
