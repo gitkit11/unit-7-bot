@@ -2,8 +2,11 @@ name: UNIT-7 Bot
 
 on:
   schedule:
-    - cron: '0 */2 * * *'  # каждые 2 часа
-  workflow_dispatch:        # Можно запустить вручную
+    - cron: '0 8 * * *'   # 08:00 UTC — Европа утро
+    - cron: '0 12 * * *'  # 12:00 UTC — США восток утро (прайм)
+    - cron: '0 18 * * *'  # 18:00 UTC — США день / Европа вечер (прайм)
+    - cron: '0 22 * * *'  # 22:00 UTC — США вечер (прайм)
+  workflow_dispatch:
 
 jobs:
   post:
