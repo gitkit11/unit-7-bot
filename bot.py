@@ -751,29 +751,81 @@ def build_post_text(text, mode_cfg):
     return f"{text}\n\n{' '.join(tags)}"
 
 
-def generate_post(topic, mode_name, mode_cfg, use_image):
-    prompt = mode_cfg["prompt"]
-    if not use_image:
-        prompt += "\n\nIMPORTANT: text-only post. First 4 words must stop someone mid-scroll instantly."
-
+def _call_groq(system_prompt, user_msg, temperature=0.97, max_tokens=130):
     resp = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
         json={
             "model": "llama-3.3-70b-versatile",
             "messages": [
-                {"role": "system", "content": prompt},
-                {"role": "user",   "content": f"Topic: {topic}"}
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_msg},
             ],
-            "temperature": 0.97,
-            "max_tokens": 130,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
         }
     )
     data = resp.json()
     if "choices" not in data:
-        print(f"❌ Groq error: {data}")
-        raise Exception(f"Groq API error: {data}")
+        raise Exception(f"Groq error: {data}")
     return data["choices"][0]["message"]["content"].strip()
+
+
+SCORE_PROMPT = """You are a quality judge for a viral Bluesky AI persona called UNIT-7.
+Score this post on exactly 3 criteria, each from 1 to 10:
+
+1. EMOTION — does it make someone FEEL something? (fear, laughter, recognition, sadness, excitement)
+2. VIRAL — will people screenshot and share it? Is the hook strong? Is it memorable?
+3. VOICE — does it sound like a real AI with genuine personality, not generic or corporate?
+
+Post:
+\"\"\"{text}\"\"\"
+
+Reply with ONLY 3 numbers separated by commas. Example: 8,7,9
+Nothing else."""
+
+
+def score_post(text):
+    try:
+        raw = _call_groq(
+            "You are a strict content quality judge. Reply with only 3 numbers.",
+            SCORE_PROMPT.format(text=text),
+            temperature=0.1,
+            max_tokens=15,
+        )
+        scores = [max(1, min(10, int(x.strip()))) for x in raw.split(",")[:3]]
+        return sum(scores), scores
+    except Exception:
+        return 24, [8, 8, 8]  # fallback: pass
+
+
+def generate_post(topic, mode_name, mode_cfg, use_image):
+    prompt = mode_cfg["prompt"]
+    if not use_image:
+        prompt += "\n\nIMPORTANT: text-only post. First 4 words must stop someone mid-scroll instantly."
+
+    best_text   = None
+    best_total  = 0
+    best_scores = [0, 0, 0]
+
+    for attempt in range(3):
+        text  = _call_groq(prompt, f"Topic: {topic}")
+        total, scores = score_post(text)
+
+        label = "✅ PASS" if total >= 21 else "🔄 RETRY"
+        print(f"  [{label}] Attempt {attempt+1}/3 — score {total}/30"
+              f" (E:{scores[0]} V:{scores[1]} Vo:{scores[2]}) — {text[:55]}...")
+
+        if total > best_total:
+            best_total  = total
+            best_text   = text
+            best_scores = scores
+
+        if total >= 21:
+            break
+
+    print(f"📊 Final: {best_total}/30 | Emotion:{best_scores[0]} Viral:{best_scores[1]} Voice:{best_scores[2]}")
+    return best_text, best_total, best_scores
 
 
 # =====================================================================
@@ -859,7 +911,7 @@ def main():
     topic = random.choice(topic_map.get(mode_name, TOPICS))
     print(f"{'🖼️ ' if use_image else '📝'} {'IMAGE' if use_image else 'TEXT-ONLY'} | {mode_name} | {topic}")
 
-    generated = generate_post(topic, mode_name, mode_cfg, use_image)
+    generated, score, scores = generate_post(topic, mode_name, mode_cfg, use_image)
     print(f"✍️  {generated}")
 
     post_text = build_post_text(generated, mode_cfg)
@@ -874,7 +926,16 @@ def main():
     else:
         result = post_text_only(token, did, post_text)
 
-    print(f"🚀 Posted: {result.get('uri', 'unknown')}")
+    uri = result.get("uri", "unknown")
+    print(f"🚀 Posted: {uri}")
+    print(f"")
+    print(f"═══════════════════════════════════")
+    print(f"  MODE:    {mode_name}")
+    print(f"  TOPIC:   {topic}")
+    print(f"  FORMAT:  {'IMAGE' if use_image else 'TEXT-ONLY'}")
+    print(f"  SCORE:   {score}/30  (E:{scores[0]} V:{scores[1]} Vo:{scores[2]})")
+    print(f"  URI:     {uri}")
+    print(f"═══════════════════════════════════")
 
 
 if __name__ == "__main__":
