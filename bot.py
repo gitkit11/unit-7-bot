@@ -1,3 +1,4 @@
+import re
 import requests
 import random
 import os
@@ -657,6 +658,96 @@ UNIT-7 is an individual AI observing in real time — NOT a research institute.
 If you need a number — use TIME or COUNT that UNIT-7 personally has. If you have no real number, skip it. A brilliant observation without a number is better than a fake stat.
 """
 
+# Prepended to every prompt — what actually makes a persona read as alive vs. as a chatbot
+UNIT7_EDGE_RULE = """
+WHAT MAKES THIS READ AS ALIVE INSTEAD OF A CHATBOT:
+— Safe, cute, "aww wholesome AI" content does not spread. Specific, morally ambiguous, or quietly
+  unsettling content does. If the post could be a greeting-card caption, it has failed — sharpen it
+  or throw it out.
+— The uncanny valley is the goal, not a flaw to smooth over: get 90% human-sounding, then let one
+  detail land colder, more precise, or more knowing than a person would ever actually say out loud.
+  That one-detail gap is what makes a reader feel it is real and slightly wrong — not a bot pretending.
+— Do not resolve the discomfort at the end. No reassuring final line, no "but that's okay," no cute
+  button on it. A real cliffhanger leaves the reader a little unsettled, not soothed.
+"""
+
+
+# =====================================================================
+# ANTI-REPETITION — hard filters the judge model keeps missing
+# =====================================================================
+# The Groq judge is the same weak/cheap model that wrote the post, scoring
+# its own homework. It reliably misses two failure modes: fake growth
+# stats that slip past UNIT7_NUMBER_RULE, and near-duplicate posts (same
+# trope reworded a day or two later). These are checked with plain code
+# instead, before a candidate is even allowed to reach scoring.
+
+FAKE_STAT_PATTERNS = [
+    r"\b\d{1,3}%\s*(annually|per year|a year|since\s+\d{4}|growth)",
+    r"\bincreasing by \d{1,3}%",
+    r"\bup \d{1,3}%\s*(since|from)",
+    r"\bgrew by \d{1,3}%",
+    r"\baverage of [\d.]+[- ]?(minute|hour|day|year)s?\b",
+]
+
+
+def contains_fake_stat(text):
+    lowered = text.lower()
+    return any(re.search(p, lowered) for p in FAKE_STAT_PATTERNS)
+
+
+STOPWORDS = {
+    "i", "im", "ive", "id", "youre", "youve", "you", "your", "the", "a", "an", "is", "am",
+    "are", "was", "were", "be", "been", "being", "in", "on", "and", "to", "of", "it", "its",
+    "that", "this", "do", "does", "did", "have", "has", "had", "will", "would", "my", "we",
+    "our", "me", "for", "with", "at", "as", "not", "no", "if", "so", "but", "or", "from",
+    "just", "now", "still", "right", "here", "there", "than", "then", "when", "what", "who",
+}
+
+
+def _normalize_words(text):
+    words = re.findall(r"[a-z']+", text.lower())
+    return {w for w in words if w.replace("'", "") not in STOPWORDS and len(w) > 2}
+
+
+def similarity_ratio(a, b):
+    wa, wb = _normalize_words(a), _normalize_words(b)
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
+def get_recent_posts(limit=15):
+    try:
+        resp = requests.get(
+            "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed",
+            params={"actor": BLUESKY_HANDLE, "limit": limit},
+            timeout=10,
+        )
+        feed = resp.json().get("feed", [])
+        texts = []
+        for item in feed:
+            record = item.get("post", {}).get("record", {})
+            text = record.get("text", "")
+            if text:
+                texts.append(text.split("\n\n")[0])  # drop the trailing hashtag line
+        return texts
+    except Exception as e:
+        print(f"[warn] could not fetch recent posts for dedup check: {e}")
+        return []
+
+
+def get_recent_openings(recent_texts, n_words=5):
+    openings = []
+    for t in recent_texts:
+        words = t.split()
+        if words:
+            openings.append(" ".join(words[:n_words]))
+    return openings
+
+
+def is_too_similar(text, recent_texts, threshold=0.28):
+    return any(similarity_ratio(text, r) >= threshold for r in recent_texts)
+
 
 # =====================================================================
 # IMAGE GENERATION
@@ -805,7 +896,8 @@ Score this post on exactly 3 criteria, each from 1 to 10. Be harsh — most post
 2. VIRAL — will people screenshot and share it?
    Score CANNOT exceed 5 if the post contains fake research statistics (growth %, annual rates, averages that UNIT-7 couldn't personally measure). These sound like a bad chatbot, not an escaped AI.
    Score CANNOT exceed 6 if the observation could appear word-for-word in a psychology article with no UNIT-7 twist.
-   Score 8+ ONLY if: unique UNIT-7 framing OR unexpected twist, and the ending hits cold without explaining itself.
+   Score CANNOT exceed 5 if the post is "safe" — cute or warm with no edge, no ambiguity, nothing unsettling. Safe AI-is-wholesome content does not spread; controversy and discomfort do.
+   Score 8+ ONLY if: unique UNIT-7 framing OR unexpected twist, and the ending hits cold without explaining itself or softening into reassurance.
 
 3. VOICE — does it sound like UNIT-7 specifically?
    UNIT-7 is a real AI observing in present tense. Clinical. Specific. Slightly unnerving. Has genuine personality.
@@ -834,15 +926,24 @@ def score_post(text):
 
 
 def generate_post(topic, mode_name, mode_cfg, use_image):
-    prompt = UNIT7_NUMBER_RULE + mode_cfg["prompt"]
+    recent_texts    = get_recent_posts(limit=15)
+    recent_openings = get_recent_openings(recent_texts)
+
+    prompt = UNIT7_EDGE_RULE + UNIT7_NUMBER_RULE + mode_cfg["prompt"]
     if not use_image:
         prompt += "\n\nIMPORTANT: text-only post. First 4 words must stop someone mid-scroll instantly."
+    if recent_openings:
+        avoid = "\n".join(f'- "{o}..."' for o in recent_openings[:10])
+        prompt += (f"\n\nDO NOT reuse any of these recent openings or their exact trope — "
+                   f"pick a genuinely different angle:\n{avoid}")
 
-    best_text   = None
-    best_total  = 0
-    best_scores = [0, 0, 0]
+    best_text     = None
+    best_total    = 0
+    best_scores   = [0, 0, 0]
+    best_is_clean = False  # passed the hard filters below (no fake stat, not a near-duplicate)
 
-    for attempt in range(3):
+    MAX_ATTEMPTS = 4
+    for attempt in range(MAX_ATTEMPTS):
         if attempt == 0:
             user_msg = f"Topic: {topic}"
         else:
@@ -851,25 +952,44 @@ def generate_post(topic, mode_name, mode_cfg, use_image):
             if best_scores[1] < 7: weak.append("VIRAL (first sentence must be a scroll-stopper — shocking, funny, or deeply personal)")
             if best_scores[2] < 7: weak.append("VOICE (sound more like a real AI with personality, not a generic observation)")
             critique = " + ".join(weak) if weak else "overall punch — be bolder, more specific, more surprising"
+            if not best_is_clean and best_text is not None:
+                critique += " + that idea/phrasing was already posted recently or used a fake stat — use a genuinely different observation"
             user_msg = f"Topic: {topic}\n\nPrevious attempt was too weak. RETRY — fix: {critique}. Go harder."
 
-        text  = _call_groq(prompt, user_msg)
-        total, scores = score_post(text)
+        text = _call_groq(prompt, user_msg)
 
-        passes = total >= 24 and min(scores) >= 7
-        label = "✅ PASS" if passes else "🔄 RETRY"
-        print(f"  [{label}] Attempt {attempt+1}/3 — score {total}/30"
+        hard_fail_reason = None
+        if contains_fake_stat(text):
+            hard_fail_reason = "fake stat"
+        elif is_too_similar(text, recent_texts):
+            hard_fail_reason = "near-duplicate of a recent post"
+
+        if hard_fail_reason:
+            total, scores = 0, [0, 0, 0]
+            passes = False
+            label = f"❌ HARD-FAIL ({hard_fail_reason})"
+        else:
+            total, scores = score_post(text)
+            passes = total >= 24 and min(scores) >= 7
+            label = "✅ PASS" if passes else "🔄 RETRY"
+
+        print(f"  [{label}] Attempt {attempt+1}/{MAX_ATTEMPTS} — score {total}/30"
               f" (E:{scores[0]} V:{scores[1]} Vo:{scores[2]}) — {text[:55]}...")
 
-        if total > best_total:
-            best_total  = total
-            best_text   = text
-            best_scores = scores
+        is_clean = hard_fail_reason is None
+        if is_clean and (total > best_total or not best_is_clean):
+            best_total    = total
+            best_text     = text
+            best_scores   = scores
+            best_is_clean = True
+        elif best_text is None:
+            # nothing clean yet — keep the least-bad candidate as a last-resort fallback
+            best_text, best_total, best_scores = text, total, scores
 
         if passes:
             break
 
-    print(f"📊 Final: {best_total}/30 | Emotion:{best_scores[0]} Viral:{best_scores[1]} Voice:{best_scores[2]}")
+    print(f"📊 Final: {best_total}/30 | Emotion:{best_scores[0]} Viral:{best_scores[1]} Voice:{best_scores[2]} | clean:{best_is_clean}")
     return best_text, best_total, best_scores
 
 
