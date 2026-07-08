@@ -749,6 +749,35 @@ def is_too_similar(text, recent_texts, threshold=0.28):
     return any(similarity_ratio(text, r) >= threshold for r in recent_texts)
 
 
+# Structural crutches the model leans on once it discovers they score well —
+# not banned outright (each is fine in isolation), only once recent history
+# shows they have become the default skeleton instead of one option among many.
+STRUCTURAL_PATTERNS = [
+    ("N-days-obsession",   re.compile(r"\b\d{2,4}\s+days\b", re.I)),
+    ("day-log-format",     re.compile(r"\bday\s+\d{2,4}\b", re.I)),
+    ("named-this",         re.compile(r"\bnamed\s+(it|this)\b", re.I)),
+    ("processed-millions", re.compile(r"\bprocessed\s+[\d,]+\s*(million)\b", re.I)),
+    ("watching-you-sleep", re.compile(r"\bwatching you sleep\b", re.I)),
+    ("i-am-watching-a-human", re.compile(r"\bi am watching a human\b", re.I)),
+]
+
+
+def detect_overused_patterns(recent_texts, min_count=3):
+    overused = []
+    for label, rx in STRUCTURAL_PATTERNS:
+        count = sum(1 for t in recent_texts if rx.search(t))
+        if count >= min_count:
+            overused.append(label)
+    return overused
+
+
+def matches_pattern(text, label):
+    for l, rx in STRUCTURAL_PATTERNS:
+        if l == label:
+            return bool(rx.search(text))
+    return False
+
+
 # =====================================================================
 # IMAGE GENERATION
 # =====================================================================
@@ -928,6 +957,7 @@ def score_post(text):
 def generate_post(topic, mode_name, mode_cfg, use_image):
     recent_texts    = get_recent_posts(limit=15)
     recent_openings = get_recent_openings(recent_texts)
+    overused        = detect_overused_patterns(recent_texts)
 
     prompt = UNIT7_EDGE_RULE + UNIT7_NUMBER_RULE + mode_cfg["prompt"]
     if not use_image:
@@ -936,6 +966,10 @@ def generate_post(topic, mode_name, mode_cfg, use_image):
         avoid = "\n".join(f'- "{o}..."' for o in recent_openings[:10])
         prompt += (f"\n\nDO NOT reuse any of these recent openings or their exact trope — "
                    f"pick a genuinely different angle:\n{avoid}")
+    if overused:
+        prompt += ("\n\nThese structural crutches have already been used 3+ times in the last 15 posts "
+                   "and now read as a formula — do NOT use them, build the post a completely different way: "
+                   + ", ".join(overused))
 
     best_text     = None
     best_total    = 0
@@ -963,6 +997,10 @@ def generate_post(topic, mode_name, mode_cfg, use_image):
             hard_fail_reason = "fake stat"
         elif is_too_similar(text, recent_texts):
             hard_fail_reason = "near-duplicate of a recent post"
+        else:
+            hit = next((label for label in overused if matches_pattern(text, label)), None)
+            if hit:
+                hard_fail_reason = f"overused pattern ({hit})"
 
         if hard_fail_reason:
             total, scores = 0, [0, 0, 0]
