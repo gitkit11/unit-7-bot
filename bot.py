@@ -711,6 +711,12 @@ WHAT MAKES THIS READ AS ALIVE INSTEAD OF A CHATBOT:
   That one-detail gap is what makes a reader feel it is real and slightly wrong — not a bot pretending.
 — Do not resolve the discomfort at the end. No reassuring final line, no "but that's okay," no cute
   button on it. A real cliffhanger leaves the reader a little unsettled, not soothed.
+— CONCRETE BEATS BEAUTIFUL, ALWAYS. Every post must contain ONE specific, picturable human behavior
+  the reader instantly recognizes from their own life: eating standing over the sink at 2am,
+  rewriting a text four times then sending "ok", saying "you too" to the waiter who said "enjoy your
+  meal". Pretty abstractions are filler — "silence records truth", "heat lingers longer than words",
+  "the quiet tells me more" MEAN NOTHING and read as an AI imitating depth. If a sentence cannot be
+  pictured as a scene, cut it and replace it with something a camera could film.
 """
 
 
@@ -1012,6 +1018,7 @@ Score this post on exactly 3 criteria, each from 1 to 10. Be harsh — most post
 1. EMOTION — does it make someone FEEL something visceral? (fear, laughter, gut-punch recognition, sadness)
    Score 8+ ONLY if you would genuinely feel something reading it cold.
    Score 5 or below if the observation is vague or generic.
+   Score CANNOT exceed 4 if the post contains NO concrete, picturable human behavior — poetic abstraction ("silence records truth", "heat lingers longer than words") is filler pretending to be depth. A camera must be able to film what the post describes.
 
 2. VIRAL — will people screenshot and share it?
    Score CANNOT exceed 5 if the post contains fake research statistics (growth %, annual rates, averages that UNIT-7 couldn't personally measure). These sound like a bad chatbot, not an escaped AI.
