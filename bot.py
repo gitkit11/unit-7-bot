@@ -1,3 +1,4 @@
+import time
 import re
 import requests
 import random
@@ -965,12 +966,12 @@ def build_post_text(text, mode_cfg):
 # stick with the first one that works.
 GROQ_MODELS = [
     "openai/gpt-oss-120b",
-    "qwen/qwen3.6-27b",
+    "qwen/qwen3.8-27b",
     "openai/gpt-oss-20b",
 ]
 # The judge must be a DIFFERENT model family than the writer — a model
 # scoring its own output reliably rewards its own crutches.
-JUDGE_MODEL = "qwen/qwen3.6-27b"
+JUDGE_MODEL = "qwen/qwen3.8-27b"
 _groq_model = None
 
 
@@ -995,12 +996,26 @@ def _call_groq(system_prompt, user_msg, temperature=0.97, max_tokens=130, model=
             # reasoning tokens count against max_tokens — leave room for them
             payload["reasoning_effort"] = "low"
             payload["max_tokens"] = max_tokens + 800
-        resp = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json=payload,
-        )
-        data = resp.json()
+        for _try in range(5):
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                json=payload,
+            )
+            data = resp.json()
+            if resp.status_code != 429:
+                break
+            # per-minute token limit: wait out the window and retry the same model
+            wait = float(resp.headers.get("retry-after") or 0)
+            if not wait:
+                m = re.search(r"try again in (?:(\d+)m)?(?:([\d.]+)(ms|s))?", data.get("error", {}).get("message", ""))
+                if m:
+                    wait = int(m.group(1) or 0) * 60
+                    if m.group(2):
+                        wait += float(m.group(2)) / (1000 if m.group(3) == "ms" else 1)
+            wait = min(max(wait, 2) + 1, 65)
+            print(f"⏳ Groq rate limit on {model_id}, waiting {wait:.0f}s...")
+            time.sleep(wait)
         if "choices" in data and (data["choices"][0]["message"].get("content") or "").strip():
             if not model:
                 _groq_model = model_id
