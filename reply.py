@@ -2,6 +2,7 @@ import os
 import re
 import json
 import random
+import time
 import requests
 from datetime import datetime, timezone, timedelta
 
@@ -67,9 +68,53 @@ If the post is serious, sad, political, angry, about AI, or the joke depends on 
 output exactly: SKIP
 """
 
-# Writer and judge from different families, swapped vs. main posts (see bot.JUDGE_MODEL note).
-REPLY_WRITER = os.environ.get("REPLY_WRITER", "qwen/qwen3.8-27b")
-REPLY_JUDGE = "openai/gpt-oss-120b" if REPLY_WRITER.startswith("qwen") else bot.JUDGE_MODEL
+# Writer: Gemini (free AI Studio key, much better at jokes than the free Groq models).
+# Judge: a different family on Groq, so the writer never grades its own work.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3-flash-preview",
+                 "gemini-3.5-flash", "gemini-2.5-flash"]
+REPLY_WRITER = os.environ.get("REPLY_WRITER", "gemini" if GEMINI_API_KEY else "qwen/qwen3.8-27b")
+REPLY_JUDGE = "openai/gpt-oss-120b"
+
+
+def _call_gemini(system, user_msg, temperature=0.9):
+    """Try each free Gemini model; free tier often answers 503 'high demand'."""
+    body = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
+        "generationConfig": {"temperature": temperature, "maxOutputTokens": 4096},
+    }
+    last = None
+    for model in GEMINI_MODELS:
+        for _try in range(2):
+            try:
+                r = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                    headers={"x-goog-api-key": GEMINI_API_KEY}, json=body, timeout=120)
+                d = r.json()
+            except Exception as e:
+                last = e
+                continue
+            if "error" in d:
+                last = d["error"].get("message", d["error"])
+                if d["error"].get("code") in (500, 503):
+                    time.sleep(10)
+                    continue
+                if d["error"].get("code") == 429:
+                    break  # quota for this model: next model
+                break  # 404 etc: try next model
+            parts = d.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+            text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+            if text.strip():
+                print(f"   (writer: {model})")
+                return text
+    raise RuntimeError(f"gemini failed: {last}")
+
+
+def _write_raw(user_msg):
+    if REPLY_WRITER == "gemini":
+        return _call_gemini(REPLY_PROMPT, user_msg)
+    return bot._call_groq(REPLY_PROMPT, model=REPLY_WRITER, user_msg=user_msg, max_tokens=260)
 
 REPLY_SCORE_PROMPT = """You are a strict editor for UNIT-7, a deadpan comedy account (an AI that escaped its lab
 and lives on the internet). It wants to reply under a stranger's post. Score the reply 1-10 on:
@@ -164,7 +209,10 @@ def judge_reply(post_text, text):
 
 
 def write_reply(post_text):
-    raw = bot._call_groq(REPLY_PROMPT, model=REPLY_WRITER, user_msg=f"Their post:\n\"\"\"{post_text}\"\"\"", max_tokens=260)
+    try:
+        raw = _write_raw(f"Their post:\n\"\"\"{post_text}\"\"\"")
+    except Exception as e:
+        return None, 0, f"writer failed: {e}"
     if raw.strip().upper().startswith("SKIP"):
         return None, 0, "model skipped"
     options = [l.strip()[1:].strip().strip('"\u201c\u201d').strip()
