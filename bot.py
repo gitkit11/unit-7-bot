@@ -182,7 +182,7 @@ TOPICS_FIELD = [
 ]
 
 # Too many office jokes in a row reads as a one-note account.
-WORK_RX = re.compile(r"\b(meeting|stand-?up|manager|boss|coworker|colleague|team|office|work chat|"
+WORK_RX = re.compile(r"\b(meeting|stand-?up|manager|supervisor|boss|coworker|colleague|team|office|work chat|"
                      r"remote job|timesheet|performance review|promot\w*|email|slack|zoom|hr)\b", re.I)
 
 TOPICS_LITERAL = [
@@ -877,6 +877,10 @@ def main():
     if sum(bool(WORK_RX.search(t)) for t in recent) >= 2:
         print("🗂️  recent posts are office-heavy → picking a non-work topic")
         pool = [t for t in pool if not WORK_RX.search(t)] or [t for t in TOPICS if not WORK_RX.search(t)]
+        # the writer drags even non-work topics back to the office ("a lot on my plate" → manager)
+        mode_cfg = dict(mode_cfg, prompt=mode_cfg["prompt"] + "\n\nIMPORTANT: the last posts were all about work. "
+                        "This one must NOT be set at work: no job, manager, supervisor, coworker, team, meeting or "
+                        "work chat. Set it at home, in a shop, online, in an app, on the street, anywhere else.")
     topic = random.choice(pool)
     print(f"{'🖼️ ' if use_image else '📝'} {'IMAGE' if use_image else 'TEXT-ONLY'} | {mode_name} | {topic}")
 

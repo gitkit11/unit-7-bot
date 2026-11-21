@@ -2,10 +2,11 @@ name: UNIT-7 Replies
 
 on:
   schedule:
-    # every 2h across EU afternoon → US night; each slot acts ~60% of the time after a random
-    # 0-50 min wait (see reply.py), so ~4-5 replies/day at irregular times, max 6/day
-    - cron: '17 12-23/2 * * *'
-    - cron: '17 0-2/2 * * *'
+    # hourly across EU afternoon → US night. GitHub silently drops many scheduled runs, so slots are
+    # dense; each one acts ~45% of the time after a random 0-50 min wait (see reply.py),
+    # giving ~4-5 replies/day at irregular times, hard cap 6/day
+    - cron: '41 11-23 * * *'
+    - cron: '41 0-3 * * *'
   workflow_dispatch:
 
 permissions:

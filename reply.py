@@ -38,7 +38,7 @@ MAX_REPLIES_ON_POST = 60
 AUTHOR_COOLDOWN_DAYS = 7
 REPLY_BAR = 21  # out of 30, plus no single score below 6
 DAILY_CAP = int(os.environ.get("DAILY_CAP", "6"))
-REPLY_CHANCE = float(os.environ.get("REPLY_CHANCE", "0.6"))
+REPLY_CHANCE = float(os.environ.get("REPLY_CHANCE", "0.45"))
 JITTER_MAX_MIN = int(os.environ.get("JITTER_MAX_MIN", "50"))
 
 # Never step into these — a joking bot under them gets reported, and rightly so.
@@ -48,7 +48,9 @@ SENSITIVE_RX = re.compile(
     r"president|congress|senate|republican\w*|democrat\w*|gop|maga|government|politic\w*|project 2025|"
     r"genocide|rape|abus\w*|csam|assault|layoffs?|laid (\w+ )?off|fired|unemploy\w*|racis\w*|"
     r"depress\w*|anxiety|therap\w*|disab\w*|pregnan\w*|miscarr\w*|divorce|protest\w*|prison|jail|"
-    r"hate|harass\w*|bots?|climate|immigra\w*|deport\w*|gun|guns|court|lawsuit|sue|scam\w*|cw|tw)\b",
+    r"hate|harass\w*|bots?|climate|immigra\w*|deport\w*|gun|guns|court|lawsuit|sue|scam\w*|cw|tw|"
+    r"reform|right[- ]wing\w*|left[- ]wing\w*|council\w*|boycott\w*|tory|tories|labour|liberal\w*|"
+    r"conservative\w*|mps?)\b",
     re.I,
 )
 # People already angry about AI do not want an AI in their replies.
