@@ -2,6 +2,7 @@ import os
 import re
 import json
 import random
+import time
 import requests
 from datetime import datetime, timezone, timedelta
 
@@ -27,12 +28,18 @@ QUERIES = [
     "small talk", "self checkout", "smart fridge", "roomba", "two factor authentication",
     "unsubscribe", "hold music", "work meeting", "my coworker", "terms and conditions",
     "password must contain", "cookie popup", "linkedin", "voicemail", "read receipts",
+    "smart speaker", "alexa", "spell check", "printer", "wifi password", "software update",
+    "are you still watching", "package delivery", "spam call", "phone battery", "group project",
+    "auto reply", "chat support", "my phone", "screen time",
 ]
 
 MIN_LIKES, MAX_LIKES = 15, 5000
 MAX_REPLIES_ON_POST = 60
 AUTHOR_COOLDOWN_DAYS = 7
 REPLY_BAR = 21  # out of 30, plus no single score below 6
+DAILY_CAP = int(os.environ.get("DAILY_CAP", "6"))
+REPLY_CHANCE = float(os.environ.get("REPLY_CHANCE", "0.6"))
+JITTER_MAX_MIN = int(os.environ.get("JITTER_MAX_MIN", "50"))
 
 # Never step into these — a joking bot under them gets reported, and rightly so.
 SENSITIVE_RX = re.compile(
@@ -228,6 +235,21 @@ def main():
     dry = bool(os.environ.get("DRY_RUN"))
     print(f"💬 UNIT-7 reply run {datetime.now()} {'(DRY_RUN)' if dry else ''}")
     state = load_state()
+
+    # Look human: the schedule fires every two hours, but each slot only sometimes acts,
+    # and when it does it waits a random while first, so replies land at irregular times.
+    if not dry:
+        day_ago = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        today = sum(r["ts"] >= day_ago for r in state["replies"])
+        if today >= DAILY_CAP:
+            print(f"⏭️  already {today} replies in the last 24h (cap {DAILY_CAP})")
+            return
+        if random.random() > REPLY_CHANCE:
+            print("⏭️  random skip this slot")
+            return
+        delay = random.randint(0, JITTER_MAX_MIN * 60)
+        print(f"⏳ waiting {delay // 60} min before replying")
+        time.sleep(delay)
     if dry:
         token, my_did = None, None
     else:

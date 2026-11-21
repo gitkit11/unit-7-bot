@@ -30,4 +30,7 @@ jobs:
           BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python bot.py
+        run: |
+          # random 0-40 min delay so posts never land on the same minute every day
+          if [ "${{ github.event_name }}" = "schedule" ]; then sleep $((RANDOM % 2400)); fi
+          python bot.py

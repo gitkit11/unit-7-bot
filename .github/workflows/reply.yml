@@ -2,8 +2,10 @@ name: UNIT-7 Replies
 
 on:
   schedule:
-    - cron: '30 15 * * *'  # 15:30 UTC — US morning / EU evening
-    - cron: '30 21 * * *'  # 21:30 UTC — US afternoon
+    # every 2h across EU afternoon → US night; each slot acts ~60% of the time after a random
+    # 0-50 min wait (see reply.py), so ~4-5 replies/day at irregular times, max 6/day
+    - cron: '17 12-23/2 * * *'
+    - cron: '17 0-2/2 * * *'
   workflow_dispatch:
 
 permissions:
@@ -16,6 +18,7 @@ concurrency:
 jobs:
   reply:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -40,4 +43,4 @@ jobs:
           git config user.name "unit7-bot"
           git config user.email "unit7-bot@users.noreply.github.com"
           git add replied.json || true
-          git diff --cached --quiet || (git commit -m "replies: update state" && git push)
+          git diff --cached --quiet || (git commit -m "replies: update state" && git pull --rebase -q && git push)
