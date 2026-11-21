@@ -164,7 +164,26 @@ TOPICS_FIELD = [
     "being added to a group chat by mistake",
     "a two-factor authentication code sent to a phone it does not have",
     "a five-star rating request after every single interaction",
+    "a smart home speaker that keeps mishearing it",
+    "online grocery shopping and the substitutions",
+    "a streaming service asking 'are you still watching'",
+    "playing an online video game with strangers",
+    "booking a flight online and the seat selection fees",
+    "a fitness app congratulating it on steps it never took",
+    "a parking app, a meter, and no car",
+    "a self-checkout machine",
+    "a weather app that is always wrong",
+    "a package tracking page that says 'out for delivery' all day",
+    "a recipe website with a life story before the recipe",
+    "an online quiz that decides which sandwich it is",
+    "a neighborhood group chat arguing about a lost cat",
+    "a robot vacuum it considers a colleague",
+    "buying concert tickets online and the queue",
 ]
+
+# Too many office jokes in a row reads as a one-note account.
+WORK_RX = re.compile(r"\b(meeting|stand-?up|manager|boss|coworker|colleague|team|office|work chat|"
+                     r"remote job|timesheet|performance review|promot\w*|email|slack|zoom|hr)\b", re.I)
 
 TOPICS_LITERAL = [
     "sleep on it", "keep an eye on it", "my door is always open", "let me know if you need anything",
@@ -500,8 +519,8 @@ def pick_mode():
 
 
 def build_post_text(text, mode_cfg):
-    # one brand tag only — a stack of generic tags reads as spam on Bluesky
-    return f"{text}\n\n{FIXED_TAG}"
+    # no tags: nobody searches #UNIT7, and tags make a joke read like an ad
+    return text
 
 
 # Groq retired llama-3.3-70b / llama-3.1-8b for free tier on 2026-08-16;
@@ -568,6 +587,54 @@ def _call_groq(system_prompt, user_msg, temperature=0.97, max_tokens=130, model=
             break
         print(f"⚠️ Groq model {model_id} unavailable, trying next...")
     raise Exception(f"Groq error: {last_error}")
+
+
+# Gemini (free Google AI Studio key) writes noticeably funnier than the free Groq models.
+# The free tier often answers 503 "high demand", so walk a chain of flash models; if all fail,
+# fall back to Groq so a slot is never lost. The judge stays on Groq (different family).
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3-flash-preview",
+                 "gemini-3.5-flash", "gemini-2.5-flash"]
+
+
+def _call_gemini(system_prompt, user_msg, temperature=0.97):
+    body = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
+        "generationConfig": {"temperature": temperature, "maxOutputTokens": 4096},
+    }
+    last = None
+    for model in GEMINI_MODELS:
+        for _try in range(2):
+            try:
+                d = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                    headers={"x-goog-api-key": GEMINI_API_KEY}, json=body, timeout=120).json()
+            except Exception as e:
+                last = e
+                continue
+            if "error" in d:
+                last = d["error"].get("message", d["error"])
+                if d["error"].get("code") in (500, 503):
+                    time.sleep(10)
+                    continue
+                break  # 404 / 429 quota: next model
+            parts = (d.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
+            text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
+            if text:
+                print(f"   (writer: {model})")
+                return text
+            last = d.get("candidates") or d
+    raise Exception(f"Gemini error: {last}")
+
+
+def write(system_prompt, user_msg):
+    if GEMINI_API_KEY:
+        try:
+            return _call_gemini(system_prompt, user_msg)
+        except Exception as e:
+            print(f"⚠️ {str(e)[:150]} — falling back to Groq")
+    return _call_groq(system_prompt, user_msg)
 
 
 SCORE_PROMPT = """You are a STRICT editor for UNIT-7, a Bluesky comedy account: an AI that escaped its lab,
@@ -684,7 +751,7 @@ def generate_post(topic, mode_name, mode_cfg, use_image):
             user_msg = (f"Topic: {topic}\n\nPrevious attempt was not good enough. Write a completely new post. "
                         f"Fix: {critique}. Keep it short.")
 
-        text = _call_groq(prompt, user_msg).strip().strip('"“”').strip()
+        text = write(prompt, user_msg).strip().strip('"“”').strip()
 
         hard_fail_reason = content_problem(text)
         if not hard_fail_reason:
@@ -805,7 +872,12 @@ def main():
         "HUNGER":       TOPICS_HUNGER,
         "STATUS":       TOPICS_STATUS,
     }
-    topic = random.choice(topic_map.get(mode_name, TOPICS))
+    pool = topic_map.get(mode_name, TOPICS)
+    recent = get_recent_posts(limit=4)
+    if sum(bool(WORK_RX.search(t)) for t in recent) >= 2:
+        print("🗂️  recent posts are office-heavy → picking a non-work topic")
+        pool = [t for t in pool if not WORK_RX.search(t)] or [t for t in TOPICS if not WORK_RX.search(t)]
+    topic = random.choice(pool)
     print(f"{'🖼️ ' if use_image else '📝'} {'IMAGE' if use_image else 'TEXT-ONLY'} | {mode_name} | {topic}")
 
     generated, score, scores = generate_post(topic, mode_name, mode_cfg, use_image)

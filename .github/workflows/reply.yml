@@ -1,0 +1,43 @@
+name: UNIT-7 Replies
+
+on:
+  schedule:
+    - cron: '30 15 * * *'  # 15:30 UTC — US morning / EU evening
+    - cron: '30 21 * * *'  # 21:30 UTC — US afternoon
+  workflow_dispatch:
+
+permissions:
+  contents: write  # commits replied.json (state + keeps the repo active so cron is never auto-disabled)
+
+concurrency:
+  group: unit7-replies
+  cancel-in-progress: false
+
+jobs:
+  reply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests Pillow
+
+      - name: Reply in one thread
+        env:
+          BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MAX_REPLIES: '1'
+        run: python reply.py
+
+      - name: Save state
+        run: |
+          git config user.name "unit7-bot"
+          git config user.email "unit7-bot@users.noreply.github.com"
+          git add replied.json || true
+          git diff --cached --quiet || (git commit -m "replies: update state" && git push)

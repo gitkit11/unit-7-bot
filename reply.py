@@ -2,7 +2,6 @@ import os
 import re
 import json
 import random
-import time
 import requests
 from datetime import datetime, timezone, timedelta
 
@@ -33,6 +32,7 @@ QUERIES = [
 MIN_LIKES, MAX_LIKES = 15, 5000
 MAX_REPLIES_ON_POST = 60
 AUTHOR_COOLDOWN_DAYS = 7
+REPLY_BAR = 21  # out of 30, plus no single score below 6
 
 # Never step into these — a joking bot under them gets reported, and rightly so.
 SENSITIVE_RX = re.compile(
@@ -40,7 +40,8 @@ SENSITIVE_RX = re.compile(
     r"war|gaza|israel\w*|ukrain\w*|russia\w*|trump|musk|biden|election|vote|police|ice|nazi\w*|"
     r"president|congress|senate|republican\w*|democrat\w*|gop|maga|government|politic\w*|project 2025|"
     r"genocide|rape|abus\w*|csam|assault|layoffs?|laid (\w+ )?off|fired|unemploy\w*|racis\w*|"
-    r"depress\w*|anxiety|therap\w*|disab\w*|pregnan\w*|miscarr\w*|divorce)\b",
+    r"depress\w*|anxiety|therap\w*|disab\w*|pregnan\w*|miscarr\w*|divorce|protest\w*|prison|jail|"
+    r"hate|harass\w*|bots?|climate|immigra\w*|deport\w*|gun|guns|court|lawsuit|sue|scam\w*|cw|tw)\b",
     re.I,
 )
 # People already angry about AI do not want an AI in their replies.
@@ -68,61 +69,28 @@ If the post is serious, sad, political, angry, about AI, or the joke depends on 
 output exactly: SKIP
 """
 
-# Writer: Gemini (free AI Studio key, much better at jokes than the free Groq models).
-# Judge: a different family on Groq, so the writer never grades its own work.
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3-flash-preview",
-                 "gemini-3.5-flash", "gemini-2.5-flash"]
-REPLY_WRITER = os.environ.get("REPLY_WRITER", "gemini" if GEMINI_API_KEY else "qwen/qwen3.8-27b")
+# Writer: Gemini (bot.write: free AI Studio key, falls back to Groq). Judge: gpt-oss on Groq,
+# a different family, so the writer never grades its own work.
 REPLY_JUDGE = "openai/gpt-oss-120b"
 
 
-def _call_gemini(system, user_msg, temperature=0.9):
-    """Try each free Gemini model; free tier often answers 503 'high demand'."""
-    body = {
-        "systemInstruction": {"parts": [{"text": system}]},
-        "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
-        "generationConfig": {"temperature": temperature, "maxOutputTokens": 4096},
-    }
-    last = None
-    for model in GEMINI_MODELS:
-        for _try in range(2):
-            try:
-                r = requests.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                    headers={"x-goog-api-key": GEMINI_API_KEY}, json=body, timeout=120)
-                d = r.json()
-            except Exception as e:
-                last = e
-                continue
-            if "error" in d:
-                last = d["error"].get("message", d["error"])
-                if d["error"].get("code") in (500, 503):
-                    time.sleep(10)
-                    continue
-                if d["error"].get("code") == 429:
-                    break  # quota for this model: next model
-                break  # 404 etc: try next model
-            parts = d.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-            text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
-            if text.strip():
-                print(f"   (writer: {model})")
-                return text
-    raise RuntimeError(f"gemini failed: {last}")
-
-
 def _write_raw(user_msg):
-    if REPLY_WRITER == "gemini":
-        return _call_gemini(REPLY_PROMPT, user_msg)
-    return bot._call_groq(REPLY_PROMPT, model=REPLY_WRITER, user_msg=user_msg, max_tokens=260)
+    return bot.write(REPLY_PROMPT, user_msg)
 
-REPLY_SCORE_PROMPT = """You are a strict editor for UNIT-7, a deadpan comedy account (an AI that escaped its lab
-and lives on the internet). It wants to reply under a stranger's post. Score the reply 1-10 on:
 
-1. FUNNY — would the original poster laugh? 8+ only for a real punchline.
-2. FITS — does it react to THIS specific post, adding something new? CANNOT exceed 4 if it would fit under any post.
-3. WELCOME — would the poster be happy to see it, not annoyed? CANNOT exceed 3 if it mocks them, lectures,
-   self-promotes, or feels like a bot barging in.
+REPLY_SCORE_PROMPT = """You are the editor for UNIT-7, a deadpan comedy account: an AI that escaped its lab and
+lives on the internet, trying to pass as a human. It wants to reply under a stranger's post.
+On Bluesky, a funny stranger chiming in with a related joke is normal and welcome. Score the reply 1-10 on:
+
+1. FUNNY: would the original poster smile or laugh? 8+ for a real punchline or twist.
+2. FITS: is it clearly about the same situation as the post? A reply that riffs on the SAME situation
+   from UNIT-7's AI point of view DOES fit; that is the whole idea, score it 7+.
+   CANNOT exceed 4 only if it is generic and would fit under almost any post.
+3. WELCOME: would the poster be glad to see it? Score 7+ for a friendly, on-topic joke.
+   CANNOT exceed 3 if it mocks the poster, lectures, self-promotes, or is off-topic.
+
+Calibration: post "I still say my number twice when leaving a voicemail" / reply "I do this with my
+IP address. I say dot out loud so nobody gets lost." -> 7,8,8
 
 Original post:
 \"\"\"{post}\"\"\"
@@ -130,7 +98,7 @@ Original post:
 Reply:
 \"\"\"{reply}\"\"\"
 
-Reply with ONLY 3 numbers separated by commas. Example: 8,7,9
+Reply with ONLY 3 numbers separated by commas. Example: 7,8,8
 Nothing else."""
 
 
@@ -231,7 +199,7 @@ def write_reply(post_text):
             print(f"   [warn] judge failed: {e}")
             continue  # never reply in a stranger's thread unjudged
         print(f"   [{total}/30 {scores}] {text}")
-        if total >= 22 and min(scores) >= 7 and total > best_total:
+        if total >= REPLY_BAR and min(scores) >= 6 and scores[0] >= 7 and total > best_total:
             best, best_total = text, total
     return (best, best_total, None) if best else (None, 0, "below bar")
 
